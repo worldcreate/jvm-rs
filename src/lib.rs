@@ -26,6 +26,7 @@ struct ClassFile {
 
 #[derive(PartialEq, Debug, Clone)]
 enum Info {
+    Offset,
     Class {name_index: u16},
     Methodref {class_index: u16, name_and_type_index: u16},
     Utf8 {length: u16, bytes: Vec<u8>},
@@ -39,11 +40,20 @@ struct CpInfo {
 }
 
 trait CustomRead {
-    fn read_limit(&mut self, limit: u16) -> Vec<u8>;
+    fn read_limit(&mut self, limit: u32) -> Vec<u8>;
 }
 
 impl CustomRead for BufReader<File> {
-    fn read_limit(&mut self, limit: u16) -> Vec<u8> {
+    fn read_limit(&mut self, limit: u32) -> Vec<u8> {
+        let mut handle = self.take(limit as u64);
+        let mut vec = vec![];
+        let _ = handle.read_to_end(&mut vec);
+        vec
+    }
+}
+
+impl CustomRead for &[u8] {
+    fn read_limit(&mut self, limit: u32) -> Vec<u8> {
         let mut handle = self.take(limit as u64);
         let mut vec = vec![];
         let _ = handle.read_to_end(&mut vec);
@@ -61,10 +71,94 @@ struct FieldsInfo {
 }
 
 #[derive(PartialEq, Debug)]
-struct AttributeInfo {
-    attribute_name_index: u16,
-    attribute_length: u32,
-    info: Vec<u8>
+enum AttributeInfo {
+    Other {attribute_name_index: u16, attribute_length: u32, info: Vec<u8>},
+    Code {
+        attribute_name_index: u16,
+        attribute_length: u32,
+        max_stack: u16,
+        max_locals: u16,
+        code_length: u32,
+        code: Vec<u8>,
+        exception_table_length: u16, 
+        exception_table: Vec<ExceptionTable>,
+        attributes_count: u16,
+        attributes: Vec<AttributeInfo>}
+}
+
+#[derive(PartialEq, Debug)]
+struct ExceptionTable {
+    start_pc: u16,
+    end_pc: u16,
+    handler_pc: u16,
+    catch_type: u16
+}
+
+impl AttributeInfo {
+    fn new(cp_info: &Vec<CpInfo>, attribute_name_index: u16, attribute_length: u32, info: Vec<u8>) -> AttributeInfo {
+
+        let attribute_name = &cp_info[attribute_name_index as usize];
+
+        
+        match &attribute_name.info {
+            Info::Utf8 {length: _, bytes} => {
+                let name = String::from_utf8(bytes.to_vec()).unwrap();
+                println!("{}", name);
+
+                if name == "Code" {
+                    let max_stack = (&bytes[..]).read_u16::<BigEndian>().unwrap();
+                    println!("max_stack = {}", max_stack);
+                    let max_locals = (&bytes[..]).read_u16::<BigEndian>().unwrap();
+                    
+                    let code_length = (&bytes[..]).read_u32::<BigEndian>().unwrap();
+                    println!("code_length = {}", code_length);
+                    let code = (&bytes[..]).read_limit(code_length);
+                    println!("code_length = {}", code_length);
+                    let exception_table_length = (&bytes[..]).read_u16::<BigEndian>().unwrap();
+                    let exception_table = (0..exception_table_length).map(|_| {
+                        let start_pc = (&bytes[..]).read_u16::<BigEndian>().unwrap();
+                        let end_pc = (&bytes[..]).read_u16::<BigEndian>().unwrap();
+                        let handler_pc = (&bytes[..]).read_u16::<BigEndian>().unwrap();
+                        let catch_type = (&bytes[..]).read_u16::<BigEndian>().unwrap();
+
+                        ExceptionTable {start_pc, end_pc, handler_pc, catch_type}
+                    }).collect();
+
+                    let attributes_count = (&bytes[..]).read_u16::<BigEndian>().unwrap();
+
+                    println!("{}", attributes_count);
+                    let attributes = (0..attributes_count).map(|_| {
+                        let attribute_name_index = (&bytes[..]).read_u16::<BigEndian>().unwrap();
+                        let attribute_length = (&bytes[..]).read_u32::<BigEndian>().unwrap();
+
+                        let info = (0..attribute_length).map(|_| {
+                            (&bytes[..]).read_u8().unwrap()
+                        }).collect();
+
+                        AttributeInfo::new(cp_info, attribute_name_index, attribute_length, info)
+                    }).collect();
+                    
+                    return AttributeInfo::Code {
+                        attribute_name_index,
+                        attribute_length,
+                        max_stack,
+                        max_locals,
+                        code_length,
+                        code,
+                        exception_table_length,
+                        exception_table,
+                        attributes_count,
+                        attributes
+                    };
+                }
+            },
+            _ => {
+                panic!();
+            }
+        }
+
+        AttributeInfo::Other {attribute_name_index, attribute_length, info}
+    }
 }
 
 #[derive(PartialEq, Debug)]
@@ -98,12 +192,13 @@ fn read_from_class() -> Result<ClassFile> {
     let constant_pool_count = reader.read_u16::<BigEndian>()?;
 
     let mut cp_info_vec = Vec::new();
+    cp_info_vec.push(CpInfo {tag: 0, info: Info::Offset});
     for _ in 0..(constant_pool_count - 1) {
         let tag = reader.read_u8()?;
         match tag {
             1 => {
                 let length = reader.read_u16::<BigEndian>()?;
-                let vec = reader.read_limit(length);
+                let vec = reader.read_limit(length as u32);
                 cp_info_vec.push(CpInfo {tag, info: Info::Utf8 {length, bytes: vec}})
             }
             7 => {
@@ -160,7 +255,7 @@ fn read_from_class() -> Result<ClassFile> {
                 reader.read_u8().unwrap()
             }).collect();
 
-            AttributeInfo {attribute_name_index, attribute_length, info}
+            AttributeInfo::new(&cp_info_vec, attribute_name_index, attribute_length, info)
         }).collect();
 
         FieldsInfo {access_flags, name_index, descriptor_index, attributes_count, attributes}
@@ -182,7 +277,7 @@ fn read_from_class() -> Result<ClassFile> {
                 reader.read_u8().unwrap()
             }).collect();
 
-            AttributeInfo {attribute_name_index, attribute_length, info}
+            AttributeInfo::new(&cp_info_vec, attribute_name_index, attribute_length, info)
         }).collect();
 
         MethodInfo {access_flags, name_index, descriptor_index, attributes_count, attributes}
@@ -198,7 +293,7 @@ fn read_from_class() -> Result<ClassFile> {
                 reader.read_u8().unwrap()
             }).collect();
 
-            AttributeInfo {attribute_name_index, attribute_length, info}
+            AttributeInfo::new(&cp_info_vec, attribute_name_index, attribute_length, info)
     }).collect();
 
     Ok(ClassFile {
@@ -222,12 +317,8 @@ fn read_from_class() -> Result<ClassFile> {
 
 #[test]
 fn test_read_from_class() {
-    let class_file = ClassFile{
-        magic: 3_405_691_582,
-        minor_version: 0,
-        major_version: 55,
-        constant_pool_count: 15,
-        cp_info: vec![
+    let cp_info_vec = vec![
+            CpInfo{tag: 0, info: Info::Offset},
             CpInfo{tag: 10, info: Info::Methodref {class_index: 3, name_and_type_index: 12}},
             CpInfo{tag: 7, info: Info::Class {name_index: 13}},
             CpInfo{tag: 7, info: Info::Class {name_index: 14}},
@@ -242,7 +333,13 @@ fn test_read_from_class() {
             CpInfo{tag: 12, info: Info::NameAndType {name_index: 4, descriptor_index: 5}},
             CpInfo{tag: 1, info: Info::Utf8 {length: 4, bytes: vec![0x54, 0x65, 0x73, 0x74]}},
             CpInfo{tag: 1, info: Info::Utf8 {length: 0x10, bytes: vec![0x6a, 0x61, 0x76, 0x61, 0x2f, 0x6c, 0x61, 0x6e, 0x67, 0x2f, 0x4f, 0x62, 0x6a, 0x65, 0x63, 0x74]}}
-            ],
+            ];
+    let class_file = ClassFile{
+        magic: 3_405_691_582,
+        minor_version: 0,
+        major_version: 55,
+        constant_pool_count: 15,
+        cp_info: cp_info_vec.clone(),
         access_flag: 0x20,
         this_class: 0x02,
         super_class: 0x03,
@@ -257,19 +354,19 @@ fn test_read_from_class() {
                 name_index: 0x0004,
                 descriptor_index: 0x0005,
                 attributes_count: 0x0001,
-                attributes: vec![AttributeInfo {attribute_name_index: 0x0006, attribute_length: 0x0000001D, info: vec![0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x05, 0x2A, 0xB7, 0x00, 0x01, 0xB1, 0x00, 0x00, 0x00, 
-                        0x01, 0x00, 0x07, 0x00, 0x00, 0x00, 0x06, 0x00, 0x01, 0x00, 0x00, 0x00, 0x02]}]
+                attributes: vec![AttributeInfo::new(&cp_info_vec, 0x0006, 0x0000001D, vec![0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x05, 0x2A, 0xB7, 0x00, 0x01, 0xB1, 0x00, 0x00, 0x00, 
+                        0x01, 0x00, 0x07, 0x00, 0x00, 0x00, 0x06, 0x00, 0x01, 0x00, 0x00, 0x00, 0x02])]
                 },
             MethodInfo {
                 access_flags: 0x09,
                 name_index: 0x08,
                 descriptor_index: 0x09,
                 attributes_count: 0x01,
-                attributes: vec![AttributeInfo {attribute_name_index: 0x06, attribute_length: 0x0000002D, info: vec![0x00, 0x02, 0x00, 0x04, 0x00, 0x00, 0x00, 0x09, 0x03, 0x3C, 0x06, 0x3D,
-                        0x1B, 0x1C, 0x60, 0x3E, 0xB1, 0x00, 0x00, 0x00, 0x01, 0x00, 0x07, 0x00, 0x00, 0x00, 0x12, 0x00, 0x04, 0x00, 0x00, 0x00, 0x04, 0x00, 0x02, 0x00, 0x05, 0x00, 0x04, 0x00, 0x07, 0x00, 0x08, 0x00, 0x08]}]
+                attributes: vec![AttributeInfo::new(&cp_info_vec, 0x06, 0x0000002D, vec![0x00, 0x02, 0x00, 0x04, 0x00, 0x00, 0x00, 0x09, 0x03, 0x3C, 0x06, 0x3D,
+                        0x1B, 0x1C, 0x60, 0x3E, 0xB1, 0x00, 0x00, 0x00, 0x01, 0x00, 0x07, 0x00, 0x00, 0x00, 0x12, 0x00, 0x04, 0x00, 0x00, 0x00, 0x04, 0x00, 0x02, 0x00, 0x05, 0x00, 0x04, 0x00, 0x07, 0x00, 0x08, 0x00, 0x08])]
             }],
         attributes_count: 1,
-        attributes: vec![AttributeInfo {attribute_name_index: 0x000A, attribute_length: 0x00000002, info: vec![0x00, 0x0B]}]
+        attributes: vec![AttributeInfo::new(&cp_info_vec, 0x000A, 0x00000002, vec![0x00, 0x0B])]
         };
     assert_eq!(read_from_class().unwrap(), class_file);
 }
