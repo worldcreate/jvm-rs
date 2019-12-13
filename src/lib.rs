@@ -3,6 +3,7 @@ use std::{
     fs::File
 };
 use byteorder::{BigEndian, ReadBytesExt};
+use std::io::Error;
 
 #[derive(PartialEq, Debug)]
 struct ClassFile {
@@ -42,6 +43,8 @@ struct CpInfo {
 trait CustomRead {
     fn read_limit(&mut self, limit: u32) -> Vec<u8>;
 }
+
+
 
 impl CustomRead for BufReader<File> {
     fn read_limit(&mut self, limit: u32) -> Vec<u8> {
@@ -94,8 +97,11 @@ struct ExceptionTable {
     catch_type: u16
 }
 
+
 impl AttributeInfo {
     fn new(cp_info: &Vec<CpInfo>, attribute_name_index: u16, attribute_length: u32, info: Vec<u8>) -> AttributeInfo {
+        let mut info_bytes = &info[..];
+        println!("{}, {}, {:?}", attribute_name_index, attribute_length, info);
 
         let attribute_name = &cp_info[attribute_name_index as usize];
 
@@ -105,39 +111,42 @@ impl AttributeInfo {
                 let name = String::from_utf8(bytes.to_vec()).unwrap();
                 println!("{}", name);
 
-                if name == "Code" {
-                    let max_stack = (&bytes[..]).read_u16::<BigEndian>().unwrap();
+                if &name == "Code" {
+                    let max_stack = info_bytes.read_u16::<BigEndian>().unwrap();
                     println!("max_stack = {}", max_stack);
-                    let max_locals = (&bytes[..]).read_u16::<BigEndian>().unwrap();
-                    
-                    let code_length = (&bytes[..]).read_u32::<BigEndian>().unwrap();
+                    let max_locals = info_bytes.read_u16::<BigEndian>().unwrap();
+                    println!("max_locals = {}", max_locals);
+
+                    let code_length = info_bytes.read_u32::<BigEndian>().unwrap();
                     println!("code_length = {}", code_length);
-                    let code = (&bytes[..]).read_limit(code_length);
-                    println!("code_length = {}", code_length);
-                    let exception_table_length = (&bytes[..]).read_u16::<BigEndian>().unwrap();
+                    let code = info_bytes.read_limit(code_length);
+                    println!("code_length = {:?}", code);
+                    let exception_table_length = info_bytes.read_u16::<BigEndian>().unwrap();
                     let exception_table = (0..exception_table_length).map(|_| {
-                        let start_pc = (&bytes[..]).read_u16::<BigEndian>().unwrap();
-                        let end_pc = (&bytes[..]).read_u16::<BigEndian>().unwrap();
-                        let handler_pc = (&bytes[..]).read_u16::<BigEndian>().unwrap();
-                        let catch_type = (&bytes[..]).read_u16::<BigEndian>().unwrap();
+                        let start_pc = info_bytes.read_u16::<BigEndian>().unwrap();
+                        let end_pc = info_bytes.read_u16::<BigEndian>().unwrap();
+                        let handler_pc = info_bytes.read_u16::<BigEndian>().unwrap();
+                        let catch_type = info_bytes.read_u16::<BigEndian>().unwrap();
 
                         ExceptionTable {start_pc, end_pc, handler_pc, catch_type}
                     }).collect();
+                    println!("exception_tables = {:?}", exception_table);
 
-                    let attributes_count = (&bytes[..]).read_u16::<BigEndian>().unwrap();
+                    let attributes_count = info_bytes.read_u16::<BigEndian>().unwrap();
 
                     println!("{}", attributes_count);
                     let attributes = (0..attributes_count).map(|_| {
-                        let attribute_name_index = (&bytes[..]).read_u16::<BigEndian>().unwrap();
-                        let attribute_length = (&bytes[..]).read_u32::<BigEndian>().unwrap();
+                        let attribute_name_index = info_bytes.read_u16::<BigEndian>().unwrap();
+                        let attribute_length = info_bytes.read_u32::<BigEndian>().unwrap();
+                        println!("{}", attribute_length);
 
                         let info = (0..attribute_length).map(|_| {
-                            (&bytes[..]).read_u8().unwrap()
+                            info_bytes.read_u8().unwrap()
                         }).collect();
 
                         AttributeInfo::new(cp_info, attribute_name_index, attribute_length, info)
                     }).collect();
-                    
+
                     return AttributeInfo::Code {
                         attribute_name_index,
                         attribute_length,
