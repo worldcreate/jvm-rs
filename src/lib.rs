@@ -147,6 +147,7 @@ impl AttributeInfo {
                         AttributeInfo::new(cp_info, attribute_name_index, attribute_length, info)
                     }).collect();
 
+                    println!("code = {:?}", code);
                     return AttributeInfo::Code {
                         attribute_name_index,
                         attribute_length,
@@ -378,4 +379,32 @@ fn test_read_from_class() {
         attributes: vec![AttributeInfo::new(&cp_info_vec, 0x000A, 0x00000002, vec![0x00, 0x0B])]
         };
     assert_eq!(read_from_class().unwrap(), class_file);
+}
+
+#[test]
+fn find_main() {
+    let file = read_from_class().unwrap();
+    for method in &file.methods {
+        let method_name = match file.cp_info[method.name_index as usize].info {
+            Info::Utf8 { length: _, bytes: ref bytes } => {
+                println!("method_name = {}", String::from_utf8(bytes.clone()).unwrap());
+
+                String::from_utf8(bytes.clone()).unwrap()
+            }
+            _ => panic!()
+        };
+
+        let descriptor = match file.cp_info[method.descriptor_index as usize].info {
+            Info::Utf8 { length: _, ref bytes } => {
+                println!("descriptor = {}", String::from_utf8(bytes.clone()).unwrap());
+                String::from_utf8(bytes.clone()).unwrap()
+            }
+            _ => panic!()
+        };
+
+        for attribute in &method.attributes {
+            println!("{:?}", attribute);
+        }
+    }
+
 }
