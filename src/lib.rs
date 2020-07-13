@@ -593,14 +593,63 @@ impl JVM {
                 println!("iconst_0");
                 self.operand_stack.push(0)
             }
+            0x06 => {
+                println!("iconst_3");
+                self.operand_stack.push(3)
+            }
             0x3C => {
                 println!("istore_1");
                 let a = self.operand_stack.pop().unwrap();
                 self.local_var[1] = Some(a)
             }
+            0x3D => {
+                println!("istore_2");
+                let a = self.operand_stack.pop().unwrap();
+                self.local_var[2] = Some(a)
+            }
+            0x3E => {
+                println!("istore_3");
+            }
+            0x1B => {
+                println!("iload_1");
+                let a = self.local_var[1].unwrap();
+                self.local_var[1] = None;
+                self.operand_stack.push(a)
+            }
+            0x1C => {
+                println!("iload_2");
+                let a = self.local_var[2].unwrap();
+                self.local_var[2] = None;
+                self.operand_stack.push(a);
+            }
+            0x60 => {
+                println!("iadd");
+                let a = self.operand_stack.pop().unwrap();
+                let b = self.operand_stack.pop().unwrap();
+                let c = a + b;
+                self.operand_stack.push(c);
+            }
             _ => {}
         }
     }
+}
+
+#[test]
+fn istoer_test() {
+    let mut jvm = JVM::new();
+
+    jvm.exec(0x03);
+    jvm.exec(0x3C);
+
+    assert_eq!(jvm.local_var.get(1).unwrap().unwrap(), 0);
+}
+
+#[test]
+fn istore_3_test() {
+    let mut jvm = JVM::new();
+
+    jvm.exec(0x06);
+    assert_eq!(jvm.operand_stack.pop().unwrap(), 3)
 }
 
 #[test]
@@ -610,7 +659,7 @@ fn find_main() {
         let method_name = match file.cp_info[method.name_index as usize].info {
             Info::Utf8 {
                 length: _,
-                bytes: ref bytes,
+                ref bytes,
             } => {
                 println!(
                     "method_name = {}",
