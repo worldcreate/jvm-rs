@@ -35,6 +35,10 @@ enum Info {
         class_index: u16,
         name_and_type_index: u16,
     },
+    Fieldref {
+        class_index: u16,
+        name_and_type_index: u16,
+    },
     Utf8 {
         length: u16,
         bytes: Vec<u8>,
@@ -217,7 +221,7 @@ struct MethodInfo {
 
 #[test]
 fn test_read_limit() {
-    let mut reader = BufReader::new(File::open("res/Test.class").unwrap());
+    let mut reader = BufReader::new(File::open("res/Test2.class").unwrap());
     let vec = reader.read_limit(4);
     assert_eq!(vec, vec![202, 254, 186, 190]);
 
@@ -226,7 +230,7 @@ fn test_read_limit() {
 }
 
 fn read_from_class() -> Result<ClassFile> {
-    let mut reader = BufReader::new(File::open("res/Test.class")?);
+    let mut reader = BufReader::new(File::open("res/Test2.class")?);
 
     let magic = reader.read_u32::<BigEndian>()?;
 
@@ -258,6 +262,17 @@ fn read_from_class() -> Result<ClassFile> {
                     tag,
                     info: Info::Class { name_index },
                 })
+            }
+            9 => {
+                let class_index = reader.read_u16::<BigEndian>()?;
+                let name_and_type_index = reader.read_u16::<BigEndian>()?;
+                cp_info_vec.push(CpInfo {
+                    tag,
+                    info: Info::Fieldref {
+                        class_index,
+                        name_and_type_index,
+                    },
+                });
             }
             10 => {
                 let class_index = reader.read_u16::<BigEndian>()?;
@@ -629,7 +644,9 @@ impl JVM {
                 let c = a + b;
                 self.operand_stack.push(c);
             }
-            _ => {}
+            _ => {
+                println!("unknown {}", c);
+            }
         }
     }
 }
