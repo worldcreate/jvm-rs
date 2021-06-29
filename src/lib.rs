@@ -670,6 +670,74 @@ fn istore_3_test() {
 }
 
 #[test]
+fn test() {
+    let file = read_from_class().unwrap();
+
+    println!("{:?}", file.cp_info[2]);
+
+    match file.cp_info[2].info {
+        Info::Offset => todo!(),
+        Info::Class { name_index } => todo!(),
+        Info::Methodref {
+            class_index,
+            name_and_type_index,
+        } => todo!(),
+        Info::Fieldref {
+            class_index,
+            name_and_type_index,
+        } => {
+            println!("{}, {}", class_index, name_and_type_index);
+            println!("{:?}", file.cp_info[class_index as usize]);
+
+            if let Info::Class { name_index } = file.cp_info[class_index as usize].info {
+                println!("{:?}", file.cp_info[name_index as usize]);
+                if let Info::Utf8 {
+                    length: _,
+                    bytes: name_bytes,
+                } = &file.cp_info[name_index as usize].info
+                {
+                    let name = String::from_utf8(name_bytes.clone()).unwrap();
+                    println!("name = {}", name);
+                }
+            }
+
+            println!("{:?}", file.cp_info[name_and_type_index as usize]);
+
+            if let Info::NameAndType {
+                name_index,
+                descriptor_index,
+            } = file.cp_info[name_and_type_index as usize].info
+            {
+                if let Info::Utf8 {
+                    length: _,
+                    bytes: name_bytes,
+                } = &file.cp_info[name_index as usize].info
+                {
+                    let name = String::from_utf8(name_bytes.clone()).unwrap();
+                    println!("name = {}", name);
+                }
+
+                println!("{:?}", file.cp_info[descriptor_index as usize]);
+
+                if let Info::Utf8 {
+                    length: _,
+                    bytes: name_bytes,
+                } = &file.cp_info[descriptor_index as usize].info
+                {
+                    let name = String::from_utf8(name_bytes.clone()).unwrap();
+                    println!("descriptor_name = {}", name);
+                }
+            }
+        }
+        Info::Utf8 { length, bytes: _ } => todo!(),
+        Info::NameAndType {
+            name_index,
+            descriptor_index,
+        } => todo!(),
+    };
+}
+
+#[test]
 fn find_main() {
     let file = read_from_class().unwrap();
     for method in &file.methods {
